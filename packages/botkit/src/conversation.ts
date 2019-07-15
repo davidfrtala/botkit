@@ -8,10 +8,12 @@
 import { Botkit } from './core';
 import { BotWorker } from './botworker';
 import { BotkitDialogWrapper } from './dialogWrapper';
-import { ActivityTypes, TurnContext, MessageFactory, ActionTypes } from 'botbuilder';
+import { Activity, ActivityTypes, TurnContext, MessageFactory, ActionTypes } from 'botbuilder';
 import { Dialog, DialogContext, DialogReason, TextPrompt, DialogTurnStatus } from 'botbuilder-dialogs';
 import * as mustache from 'mustache';
 const debug = require('debug')('botkit:conversation');
+
+type BotkitMessageTemplateAsync = (activity: Activity, values: any) => Promise<Partial<BotkitMessageTemplate>> | Promise<string>;
 
 /**
  * Definition of the handler functions used to handle .ask and .addQuestion conditions
@@ -152,7 +154,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      *
      * @param message Message template to be sent
      */
-    public say(message: Partial<BotkitMessageTemplate> | string): BotkitConversation {
+    public say(message: Partial<BotkitMessageTemplate> | BotkitMessageTemplateAsync | string): BotkitConversation {
         this.addMessage(message, 'default');
         return this;
     }
@@ -267,7 +269,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      * @param message Message template to be sent
      * @param thread_name Name of thread to which message will be added
      */
-    public addMessage(message: Partial<BotkitMessageTemplate> | string, thread_name: string): BotkitConversation {
+    public addMessage(message: Partial<BotkitMessageTemplate> | BotkitMessageTemplateAsync | string, thread_name: string): BotkitConversation {
         if (!thread_name) {
             thread_name = 'default';
         }
@@ -329,7 +331,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      * @param handlers one or more handler functions defining possible conditional actions based on the response to the question.
      * @param key name of variable to store response in.
      */
-    public ask(message: Partial<BotkitMessageTemplate> | string, handlers: BotkitConvoTrigger | BotkitConvoTrigger[], key: {key: string} | string): BotkitConversation {
+    public ask(message: Partial<BotkitMessageTemplate> | BotkitMessageTemplateAsync | string, handlers: BotkitConvoTrigger | BotkitConvoTrigger[], key: {key: string} | string): BotkitConversation {
         this.addQuestion(message, handlers, key, 'default');
         return this;
     }
@@ -343,7 +345,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      * @param key Name of variable to store response in.
      * @param thread_name Name of thread to which message will be added
      */
-    public addQuestion(message: Partial<BotkitMessageTemplate> | string, handlers: BotkitConvoTrigger | BotkitConvoTrigger[], key: {key: string} | string, thread_name: string): BotkitConversation {
+    public addQuestion(message: Partial<BotkitMessageTemplate> | BotkitMessageTemplateAsync | string, handlers: BotkitConvoTrigger | BotkitConvoTrigger[], key: {key: string} | string, thread_name: string): BotkitConversation {
         if (!thread_name) {
             thread_name = 'default';
         }
@@ -356,6 +358,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             message = { text: [message as string] };
         }
 
+        // TODO: find a solution for this, if messsage is a function
         message.collect = {
             key: typeof (key) === 'string' ? key : key.key
         };
@@ -644,7 +647,18 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             // This prompt must be a valid dialog defined somewhere in your code!
             if (line.collect && line.action !== 'beginDialog') {
                 try {
-                    return await dc.prompt(this._prompt, this.makeOutgoing(line, step.values));
+                    let outgoing;
+                    if (typeof line === 'function') {
+                        const activity = dc.context._activity;
+                        const values = step.values;
+                        const fceLine = await line(activity, values);
+                        outgoing = this.makeOutgoing(fceLine, step.values);
+                    } else {
+                        outgoing = this.makeOutgoing(line, step.values);
+                    }
+
+                    // await
+                    return await dc.prompt(this._prompt, outgoing);
                 } catch (err) {
                     console.error(err);
                     await dc.context.sendActivity(`Failed to start prompt ${ this._prompt }`);
@@ -655,7 +669,17 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             } else {
                 // if there is text, attachments, or any channel data fields at all...
                 if (line.type || line.text || line.attachments || (line.channelData && Object.keys(line.channelData).length)) {
-                    await dc.context.sendActivity(this.makeOutgoing(line, step.values));
+                    let outgoing;
+                    if (typeof line === 'function') {
+                        const activity = dc.context._activity;
+                        const values = step.values;
+                        const fceLine = await line(activity, values);
+                        outgoing = this.makeOutgoing(fceLine, step.values);
+                    } else {
+                        outgoing = this.makeOutgoing(line, step.values);
+                    }
+
+                    await dc.context.sendActivity(outgoing);
                 } else if (!line.action) {
                     console.error('Dialog contains invalid message', line);
                 }
