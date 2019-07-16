@@ -643,22 +643,22 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
         if (step.index < thread.length) {
             let line = thread[step.index];
 
+            if (typeof line === 'function') {
+                const activity = dc.context._activity;
+                const values = step.values;
+                const fcLine = await line(activity, values);
+
+                line = {
+                    ...line,
+                    ...fcLine
+                }
+            }
+
             // If a prompt is defined in the script, use dc.prompt to call it.
             // This prompt must be a valid dialog defined somewhere in your code!
             if (line.collect && line.action !== 'beginDialog') {
                 try {
-                    let outgoing;
-                    if (typeof line === 'function') {
-                        const activity = dc.context._activity;
-                        const values = step.values;
-                        const fceLine = await line(activity, values);
-                        outgoing = this.makeOutgoing(fceLine, step.values);
-                    } else {
-                        outgoing = this.makeOutgoing(line, step.values);
-                    }
-
-                    // await
-                    return await dc.prompt(this._prompt, outgoing);
+                    return await dc.prompt(this._prompt, this.makeOutgoing(line, step.values));
                 } catch (err) {
                     console.error(err);
                     await dc.context.sendActivity(`Failed to start prompt ${ this._prompt }`);
@@ -669,17 +669,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             } else {
                 // if there is text, attachments, or any channel data fields at all...
                 if (line.type || line.text || line.attachments || (line.channelData && Object.keys(line.channelData).length)) {
-                    let outgoing;
-                    if (typeof line === 'function') {
-                        const activity = dc.context._activity;
-                        const values = step.values;
-                        const fceLine = await line(activity, values);
-                        outgoing = this.makeOutgoing(fceLine, step.values);
-                    } else {
-                        outgoing = this.makeOutgoing(line, step.values);
-                    }
-
-                    await dc.context.sendActivity(outgoing);
+                    await dc.context.sendActivity(this.makeOutgoing(line, step.values));
                 } else if (!line.action) {
                     console.error('Dialog contains invalid message', line);
                 }
