@@ -756,8 +756,8 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             ...dc.activeDialog.state.values
         };
 
-        await dc.endDialog(result);
         await this.runAfter(dc, result);
+        await dc.endDialog(result);
         return DialogTurnStatus.complete;
     }
 
